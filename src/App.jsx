@@ -1,55 +1,44 @@
 // ============================================================
 //  TAKEO PERFUMARIA — App.jsx
-//  Orquestrador principal: dados, filtros em cascata, modais
+//  Orquestrador: Vitrine com Paginação Estilo Amazon (1, 2, 3...) + Filtros
 // ============================================================
 import { useState, useEffect, useCallback, useMemo } from "react";
 
-// Importações corretas a partir do seu arquivo utils.js na raiz
 import { CONFIG, parseProduct} from "./utils/formatters.js";
 import {useCart} from"./Hooks/useCart.js";
 import {useToast} from"./Hooks/useToast.js";
 
-// Componentes localizados na sua pasta ./components/
 import Header           from "./assets/components/Header.jsx";
+import Footer           from "./assets/components/Footer.jsx";
 import { Icons }        from "./assets/components/Icons.jsx";
 import ProductCard      from "./assets/components/features/Catalog/components/ProductCard.jsx";
 import ProductModal     from "./assets/components/features/Catalog/components/ProductModal.jsx";
-import FeaturedCarousel from "./assets/components/features/Catalog/components/FeaturedCarousel.jsx";
-import FilterBar        from "./assets/components/features/Catalog/components/FilterBar.jsx";
 import CartDrawer       from "./assets/components/features/Cart/CartDrawer.jsx";
-import HeroBanner       from "./assets/components/features/Catalog/HeroBanner.jsx"; // <-- Banner importado corretamente aqui!
+import HeroBanner       from "./assets/components/features/Catalog/HeroBanner.jsx";
 import { FloatingCart} from "./assets/components/features/Cart/FloatingCart.jsx";
 import { ToastContainer } from "./assets/components/features/Cart/FloatingCart.jsx";
-// ── Skeleton de produto ─────────────────────────────────────
-function ProductSkeleton() {
-  return (
-    <div style={{ background: "var(--surface)", borderRadius: "var(--radius-xl)", overflow: "hidden", border: "1px solid var(--border)" }}>
-      <div className="skeleton" style={{ height: 200 }} />
-      <div style={{ padding: "var(--space-4)", display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
-        <div className="skeleton" style={{ height: 11, width: "40%" }} />
-        <div className="skeleton" style={{ height: 18, width: "80%" }} />
-        <div className="skeleton" style={{ height: 11, width: "60%" }} />
-        <div className="skeleton" style={{ height: 38 }} />
-      </div>
-    </div>
-  );
-}
 
-// ── App ─────────────────────────────────────────────────────
 export default function App() {
   const [products,       setProducts]       = useState([]);
   const [loading,        setLoading]        = useState(true);
   const [error,          setError]          = useState(null);
   const [cartOpen,       setCartOpen]       = useState(false);
   const [modalProduct,   setModalProduct]   = useState(null);
+  
   const [search,         setSearch]         = useState("");
-  const [activeCategory, setActiveCategory] = useState("Todos");
-  const [activeSub,      setActiveSub]      = useState("");
+  const [viewCategory,   setViewCategory]   = useState(null);
+
+  // 🚀 NOVOS ESTADOS PARA A PAGINAÇÃO E FILTROS DA AMAZON
+  const [currentPage,    setCurrentPage]    = useState(1);
+  const itemsPerPage = 20; // Mostra exatamente 20 produtos por página
+
+  // Filtros internos da categoria focada
+  const [filterSub,      setFilterSub]      = useState("Todos");
+  const [filterPromo,    setFilterPromo]    = useState(false);
 
   const cart  = useCart();
   const toast = useToast();
 
-  // ── Fetch dados ──────────────────────────────────────────
   const fetchProducts = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -69,70 +58,61 @@ export default function App() {
 
   useEffect(() => { fetchProducts(); }, [fetchProducts]);
 
-  // ── Categorias dinâmicas ─────────────────────────────────
   const categories = useMemo(() => {
-    const cats = products.map((p) => p.categoria);
+    const cats = products.map((p) => p.categoria).filter(Boolean);
     return [...new Set(cats)].sort();
   }, [products]);
 
-  // ── Subcategorias em cascata ─────────────────────────────
-  const subcategories = useMemo(() => {
-    if (activeCategory === "Todos") return [];
+  // 🔍 1. MODO BUSCA: Filtro Geral do Header
+  const searchFilteredProducts = useMemo(() => {
+    if (!search.trim()) return [];
+    const q = search.trim().toLowerCase();
+    return products.filter(
+      (p) =>
+        p.nome.toLowerCase().includes(q) ||
+        p.categoria.toLowerCase().includes(q)
+    );
+  }, [products, search]);
+
+  // 🌪️ 2. MODO AMAZON: Filtros aplicados DENTRO da categoria selecionada
+  const categoryFilteredProducts = useMemo(() => {
+    if (!viewCategory) return [];
+    
+    return products.filter((p) => {
+      const matchesCategory = p.categoria === viewCategory;
+      const matchesSub = filterSub === "Todos" || p.subcategoria === filterSub;
+      const matchesPromo = !filterPromo || p.preco_promo !== null;
+      return matchesCategory && matchesSub && matchesPromo;
+    });
+  }, [products, viewCategory, filterSub, filterPromo]);
+
+  // 🏷️ Subcategorias dinâmicas baseadas na categoria atual para montar o filtro do topo
+  const currentSubcategories = useMemo(() => {
+    if (!viewCategory) return [];
     const subs = products
-      .filter((p) => p.categoria === activeCategory && p.subcategoria)
+      .filter((p) => p.categoria === viewCategory && p.subcategoria)
       .map((p) => p.subcategoria);
-    return [...new Set(subs)].sort();
-  }, [products, activeCategory]);
+    return ["Todos", ...new Set(subs)].sort();
+  }, [products, viewCategory]);
 
-  // Limpa subcategoria quando muda categoria
-  const handleCategoryChange = (cat) => {
-    setActiveCategory(cat);
-    setActiveSub("");
+  // 📑 3. CÁLCULO DE PAGINAÇÃO MATEMÁTICA (Fatia os 20 itens certos)
+  const totalPages = Math.ceil(categoryFilteredProducts.length / itemsPerPage);
+  
+  const paginatedProducts = useMemo(() => {
+    const start = (currentPage - 1) * itemsPerPage;
+    const end = start + itemsPerPage;
+    return categoryFilteredProducts.slice(start, end);
+  }, [categoryFilteredProducts, currentPage]);
+
+  // Reseta estados auxiliares ao alternar de categoria
+  const handleCategoryView = (cat) => {
+    setViewCategory(cat);
+    setFilterSub("Todos");
+    setFilterPromo(false);
+    setCurrentPage(1);
     setSearch("");
   };
 
-  const handleSubChange = (sub) => {
-    setActiveSub(sub);
-    setSearch("");
-  };
-
-  // ── Produtos filtrados ───────────────────────────────────
-  const filtered = useMemo(() => {
-    let result = products;
-
-    if (activeCategory !== "Todos") {
-      result = result.filter((p) => p.categoria === activeCategory);
-    }
-    if (activeSub) {
-      result = result.filter((p) => p.subcategoria === activeSub);
-    }
-    if (search.trim()) {
-      const q = search.trim().toLowerCase();
-      result = result.filter(
-        (p) =>
-          p.nome.toLowerCase().includes(q) ||
-          p.descricao_curta.toLowerCase().includes(q) ||
-          p.categoria.toLowerCase().includes(q) ||
-          p.subcategoria.toLowerCase().includes(q)
-      );
-    }
-
-    return result;
-  }, [products, activeCategory, activeSub, search]);
-
-  // ── Produtos em destaque (carrossel) ─────────────────────
-  const featured = useMemo(
-    () => products.filter((p) => p.destaque && p.estoque > 0),
-    [products]
-  );
-
-  const showCarousel =
-    !search &&
-    activeCategory === "Todos" &&
-    !activeSub &&
-    featured.length > 0;
-
-  // ── Adicionar ao carrinho ────────────────────────────────
   const handleAdd = useCallback(
     (product) => {
       cart.add(product);
@@ -141,240 +121,212 @@ export default function App() {
     [cart, toast]
   );
 
-  // ─────────────────────────────────────────────────────────
   return (
     <div style={{ minHeight: "100dvh", background: "var(--bg)" }}>
-
-      {/* Toasts */}
       <ToastContainer toasts={toast.toasts} />
-
-      {/* Header */}
-      <Header cartCount={cart.totalItems} onCartOpen={() => setCartOpen(true)} />
-
-      {/* Drawer */}
-      {cartOpen && (
-        <CartDrawer cart={cart} onClose={() => setCartOpen(false)} />
-      )}
-
-      {/* Modal de detalhes */}
-      {modalProduct && (
-        <ProductModal
-          product={modalProduct}
-          onClose={() => setModalProduct(null)}
-          onAdd={(p) => { handleAdd(p); setModalProduct(null); }}
-        />
-      )}
-
-      {/* Botão flutuante */}
-      <FloatingCart
-        totalItems={cart.totalItems}
-        totalPrice={cart.totalPrice}
-        onOpen={() => setCartOpen(true)}
+      
+      <Header 
+        cartCount={cart.totalItems} 
+        onCartOpen={() => setCartOpen(true)} 
+        searchValue={search}
+        onSearchChange={(val) => { setSearch(val); setViewCategory(null); }}
       />
 
-      {/* Hero (Componente Isolado) */}
-      <HeroBanner count={products.length} />
+      {/* Drawer & Modais */}
+      {cartOpen && <CartDrawer cart={cart} onClose={() => setCartOpen(false)} />}
+      {modalProduct && (
+        <ProductModal product={modalProduct} onClose={() => setModalProduct(null)} onAdd={(p) => { handleAdd(p); setModalProduct(null); }} />
+      )}
+      <FloatingCart totalItems={cart.totalItems} totalPrice={cart.totalPrice} onOpen={() => setCartOpen(true)} />
 
-      {/* Main */}
+      <HeroBanner />
+
       <main style={{
         maxWidth: "var(--max-w)",
         margin:   "0 auto",
-        padding:  "var(--space-8) var(--space-5) calc(var(--space-16) + 80px)",
+        padding:  "var(--space-6) var(--space-5) calc(var(--space-16) + 40px)",
       }}>
 
-        {/* Carrossel destaques */}
-        {showCarousel && (
-          <FeaturedCarousel
-            products={featured}
-            onAdd={handleAdd}
-            onOpenModal={setModalProduct}
-          />
-        )}
-
-        {/* Filtros */}
-        <FilterBar
-          search={search}
-          onSearchChange={setSearch}
-          categories={categories}
-          activeCategory={activeCategory}
-          onCategoryChange={handleCategoryChange}
-          subcategories={subcategories}
-          activeSubcategory={activeSub}
-          onSubcategoryChange={handleSubChange}
-        />
-
-        {/* Título da seção */}
-        <div style={{
-          display:        "flex",
-          alignItems:     "center",
-          justifyContent: "space-between",
-          marginBottom:   "var(--space-5)",
-        }}>
-          <h2 style={{
-            fontFamily: "var(--font-display)",
-            fontSize:   "clamp(1.3rem, 4vw, 1.7rem)",
-            fontWeight: 600,
-            color:      "var(--purple-deep)",
-          }}>
-            {search
-              ? `Resultados para "${search}"`
-              : activeCategory === "Todos"
-              ? "Todos os Produtos"
-              : activeSub
-              ? `${activeCategory} · ${activeSub}`
-              : activeCategory}
-          </h2>
-          {!loading && filtered.length > 0 && (
-            <span style={{ fontSize: ".78rem", color: "var(--text-muted)", whiteSpace: "nowrap" }}>
-              {filtered.length} {filtered.length === 1 ? "produto" : "produtos"}
-            </span>
-          )}
-        </div>
-
-        {/* ── Estado: carregando ──────────────────── */}
-        {loading && (
-          <div style={{
-            display:             "grid",
-            gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))",
-            gap:                 "var(--space-5)",
-          }}>
-            {Array.from({ length: 8 }).map((_, i) => <ProductSkeleton key={i} />)}
-          </div>
-        )}
-
-        {/* ── Estado: erro ──────────────────────── */}
-        {error && !loading && (
-          <div style={{
-            textAlign:       "center",
-            padding:         "var(--space-16) var(--space-8)",
-            display:         "flex",
-            flexDirection:   "column",
-            alignItems:      "center",
-            gap:             "var(--space-4)",
-          }}>
-            <div style={{
-              width:          72,
-              height:         72,
-              borderRadius:   "50%",
-              background:     "#FEF2F2",
-              display:        "flex",
-              alignItems:     "center",
-              justifyContent: "center",
-              color:          "#EF4444",
-            }}>
-              <Icons.AlertTriangle size={32} />
+        {/* ============================================================
+            CENA A: MODO BUSCA
+           ============================================================ */}
+        {search.trim() && (
+          <section style={{ display: "flex", flexDirection: "column", gap: "var(--space-4)" }}>
+            <h2 style={{ fontFamily: "var(--font-display)", fontSize: "1.4rem", fontWeight: 600, color: "var(--purple-deep)" }}>
+              Resultados para "{search}" ({searchFilteredProducts.length})
+            </h2>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: "var(--space-5)" }}>
+              {searchFilteredProducts.map((p) => (
+                <ProductCard key={p.id} product={p} onAdd={handleAdd} onOpenModal={setModalProduct} />
+              ))}
             </div>
-            <h3 style={{ fontFamily: "var(--font-display)", fontSize: "1.3rem", color: "var(--purple-deep)" }}>
-              Não conseguimos carregar os produtos
-            </h3>
-            <p style={{ fontSize: ".85rem", color: "var(--text-secondary)", maxWidth: 380 }}>
-              Verifique a <code>SHEETDB_URL</code> no arquivo <code>utils.js</code>.
-            </p>
-            <button
-              onClick={fetchProducts}
-              style={{
-                display:      "flex",
-                alignItems:   "center",
-                gap:          "var(--space-2)",
-                padding:      "var(--space-3) var(--space-6)",
-                background:   "linear-gradient(135deg, var(--purple-main), var(--purple-mid))",
-                color:        "#fff",
-                fontWeight:   600,
-                fontSize:     ".9rem",
-                borderRadius: "var(--radius-full)",
-                border:       "none",
-                cursor:       "pointer",
-              }}
-            >
-              <Icons.RefreshCw size={16} /> Tentar novamente
-            </button>
-          </div>
+          </section>
         )}
 
-        {/* ── Estado: sem resultados ────────────── */}
-        {!loading && !error && filtered.length === 0 && (
-          <div style={{
-            textAlign:       "center",
-            padding:         "var(--space-16) var(--space-8)",
-            display:         "flex",
-            flexDirection:   "column",
-            alignItems:      "center",
-            gap:             "var(--space-4)",
-          }}>
-            <div style={{ animation: "float 3s ease-in-out infinite" }}>
-              <Icons.Perfume size={80} />
-            </div>
-            <h3 style={{ fontFamily: "var(--font-display)", fontSize: "1.3rem", color: "var(--purple-deep)" }}>
-              {products.length === 0 ? "Nenhum produto cadastrado ainda" : "Nenhum produto encontrado"}
-            </h3>
-            <p style={{ fontSize: ".85rem", color: "var(--text-secondary)", maxWidth: 360 }}>
-              {search
-                ? "Tente buscar outro termo ou explore as categorias."
-                : "Adicione produtos na planilha e eles aparecerão aqui."}
-            </p>
-            {(search || activeCategory !== "Todos" || activeSub) && (
-              <button
-                onClick={() => { setSearch(""); setActiveCategory("Todos"); setActiveSub(""); }}
-                style={{
-                  padding:      "var(--space-3) var(--space-6)",
-                  background:   "var(--lilac-pale)",
-                  color:        "var(--purple-mid)",
-                  fontWeight:   600,
-                  fontSize:     ".88rem",
-                  borderRadius: "var(--radius-full)",
-                  border:         "1px solid var(--border-purple)",
-                  cursor:       "pointer",
-                }}
-              >
-                Ver todos os produtos
+        {/* ============================================================
+            CENA B: SEÇÃO DETALHADA COM REFINAMENTO DA AMAZON + PAGINAÇÃO
+           ============================================================ */}
+        {!search.trim() && viewCategory && (
+          <section style={{ display: "flex", flexDirection: "column", gap: "var(--space-5)" }}>
+            
+            {/* Topbar de Título */}
+            <div style={{ display: "flex", alignItems: "center", gap: 12, borderBottom: "1px solid var(--lilac-soft)", paddingBottom: "var(--space-2)" }}>
+              <button onClick={() => setViewCategory(null)} style={{ background: "var(--lilac-pale)", border: "none", borderRadius: "50%", width: 32, height: 32, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--purple-main)", fontWeight: "bold" }}>
+                ←
               </button>
+              <h2 style={{ fontFamily: "var(--font-display)", fontSize: "1.5rem", fontWeight: 700, color: "var(--purple-deep)", textTransform: "capitalize" }}>
+                {viewCategory.toLowerCase()}
+              </h2>
+              <span style={{ fontSize: ".8rem", color: "var(--text-muted)", marginLeft: "auto" }}>
+                {categoryFilteredProducts.length} itens encontrados
+              </span>
+            </div>
+
+            {/* 🌪️ PAINEL DE FILTROS REFINADOS (ESTILO AMAZON) */}
+            <div style={{ 
+              background: "var(--surface)", 
+              padding: "var(--space-4)", 
+              borderRadius: "var(--radius-lg)", 
+              border: "1px solid var(--border)", 
+              display: "flex", 
+              flexWrap: "wrap", 
+              gap: "var(--space-4)", 
+              alignItems: "center" 
+            }}>
+              {/* Filtro de Subcategoria */}
+              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                <span style={{ fontSize: ".72rem", fontWeight: 700, color: "var(--purple-mid)", textTransform: "uppercase" }}>Tipo de Produto</span>
+                <select 
+                  value={filterSub} 
+                  onChange={(e) => { setFilterSub(e.target.value); setCurrentPage(1); }}
+                  style={{ padding: "6px 12px", borderRadius: "var(--radius-md)", border: "1px solid var(--border-purple)", background: "#fff", color: "var(--purple-deep)", outline: "none", fontSize: ".85rem" }}
+                >
+                  {currentSubcategories.map(sub => (
+                    <option key={sub} value={sub}>{sub}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Filtro de Ofertas */}
+              <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: ".85rem", fontWeight: 600, color: "var(--purple-deep)", cursor: "pointer", marginTop: 16 }}>
+                <input 
+                  type="checkbox" 
+                  checked={filterPromo} 
+                  onChange={(e) => { setFilterPromo(e.target.checked); setCurrentPage(1); }}
+                  style={{ width: 16, height: 16, accentColor: "var(--purple-main)" }}
+                />
+                🏷️ Ver apenas Ofertas / Promoções
+              </label>
+            </div>
+            
+            {/* GRID PRINCIPAL DA PÁGINA */}
+            {paginatedProducts.length === 0 ? (
+              <p style={{ textClassName: "center", padding: "var(--space-12)", color: "var(--text-muted)", textAlign: "center" }}>Nenhum item corresponde aos filtros selecionados. ➔</p>
+            ) : (
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: "var(--space-5)" }}>
+                {paginatedProducts.map((p) => (
+                  <ProductCard key={p.id} product={p} onAdd={handleAdd} onOpenModal={setModalProduct} />
+                ))}
+              </div>
             )}
-          </div>
+
+            {/* 📑 NAVEGADOR DE PÁGINAS COM SETAS (1, 2, 3...) */}
+            {totalPages > 1 && (
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, marginTop: "var(--space-8)" }}>
+                {/* Seta Esquerda */}
+                <button 
+                  disabled={currentPage === 1}
+                  onClick={() => setCurrentPage(p => p - 1)}
+                  style={{ padding: "8px 12px", borderRadius: "var(--radius-md)", border: "1px solid var(--border-purple)", background: currentPage === 1 ? "var(--surface-2)" : "#fff", color: "var(--purple-main)", cursor: currentPage === 1 ? "default" : "pointer", fontWeight: "bold" }}
+                >
+                  &lt;
+                </button>
+
+                {/* Números Centrais */}
+                {Array.from({ length: totalPages }).map((_, i) => {
+                  const pageNum = i + 1;
+                  return (
+                    <button
+                      key={pageNum}
+                      onClick={() => setCurrentPage(pageNum)}
+                      style={{
+                        width: 38,
+                        height: 38,
+                        borderRadius: "var(--radius-md)",
+                        border: "none",
+                        background: currentPage === pageNum ? "linear-gradient(135deg, var(--purple-main), var(--purple-mid))" : "var(--lilac-pale)",
+                        color: currentPage === pageNum ? "#fff" : "var(--purple-deep)",
+                        fontWeight: 700,
+                        cursor: "pointer"
+                      }}
+                    >
+                      {pageNum}
+                    </button>
+                  );
+                })}
+
+                {/* Seta Direita */}
+                <button 
+                  disabled={currentPage === totalPages}
+                  onClick={() => setCurrentPage(p => p + 1)}
+                  style={{ padding: "8px 12px", borderRadius: "var(--radius-md)", border: "1px solid var(--border-purple)", background: currentPage === totalPages ? "var(--surface-2)" : "#fff", color: "var(--purple-main)", cursor: currentPage === totalPages ? "default" : "pointer", fontWeight: "bold" }}
+                >
+                  &gt;
+                </button>
+              </div>
+            )}
+
+          </section>
         )}
 
-        {/* ── Grid de produtos ──────────────────── */}
-        {!loading && !error && filtered.length > 0 && (
-          <div style={{
-            display:             "grid",
-            gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))",
-            gap:                 "var(--space-5)",
-          }}>
-            {filtered.map((p, i) => (
-              <ProductCard
-                key={p.id}
-                product={p}
-                onAdd={handleAdd}
-                onOpenModal={setModalProduct}
-                style={{ animationDelay: `${Math.min(i, 9) * 0.055}s` }}
-              />
-            ))}
+        {/* ============================================================
+            CENA C: SEÇÕES HORIZONTAIS COM LIMITE DE 12 ITENS NO CARROSSEL
+           ============================================================ */}
+        {!search.trim() && !viewCategory && !loading && !error && (
+          <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-10)" }}>
+            {categories.map((category) => {
+              const categoryProducts = products.filter(p => p.categoria === category);
+              const carouselItems = categoryProducts.slice(0, 12);
+
+              return (
+                <section key={category} style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
+                  
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", borderBottom: "1px solid var(--lilac-soft)", paddingBottom: 6 }}>
+                    <h2 style={{ fontFamily: "var(--font-display)", fontSize: "1.35rem", fontWeight: 700, color: "var(--purple-deep)", textTransform: "capitalize" }}>
+                      {category.toLowerCase()}
+                    </h2>
+                    <button 
+                      onClick={() => handleCategoryView(category)}
+                      style={{ background: "none", border: "none", color: "var(--purple-main)", fontWeight: 700, fontSize: ".82rem", cursor: "pointer" }}
+                    >
+                      Ver todos ({categoryProducts.length}) ➔
+                    </button>
+                  </div>
+
+                  <div style={{
+                    display: "flex",
+                    gap: "var(--space-4)",
+                    overflowX: "auto",
+                    paddingBottom: "var(--space-4)",
+                    paddingTop: 4,
+                    scrollSnapType: "x mandatory",
+                    WebkitOverflowScrolling: "touch"
+                  }}>
+                    {carouselItems.map((p) => (
+                      <div key={p.id} style={{ flex: "0 0 250px", scrollSnapAlign: "start" }}>
+                        <ProductCard product={p} onAdd={handleAdd} onOpenModal={setModalProduct} />
+                      </div>
+                    ))}
+                  </div>
+
+                </section>
+              );
+            })}
           </div>
         )}
       </main>
 
-      {/* Footer */}
-      <footer style={{
-        background:  "var(--purple-deep)",
-        color:       "rgba(233,213,255,.65)",
-        textAlign:   "center",
-        padding:     "var(--space-8) var(--space-5)",
-        fontSize:    ".82rem",
-        lineHeight:  1.8,
-      }}>
-        <p style={{
-          fontFamily:   "var(--font-display)",
-          fontSize:     "1.2rem",
-          color:        "#fff",
-          fontWeight:   600,
-          marginBottom: "var(--space-2)",
-        }}>
-          🌸 {CONFIG.STORE_NAME}
-        </p>
-        <p>Fragrâncias & Cosméticos Premium</p>
-        <p style={{ marginTop: "var(--space-3)", color: "rgba(233,213,255,.35)", fontSize: ".72rem" }}>
-          Todos os preços em Real Brasileiro · Imagens meramente ilustrativas
-        </p>
-      </footer>
+      <Footer />
     </div>
   );
 }

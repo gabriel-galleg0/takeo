@@ -1,11 +1,12 @@
 // ============================================================
 //  TAKEO PERFUMARIA — components/Header.jsx
+//  Header limpo com busca integrada (Sem contadores fixos)
 // ============================================================
 import { useState, useEffect } from "react";
 import { CONFIG } from "../../utils/formatters.js";
 import { Icons } from "./Icons.jsx";
 
-export default function Header({ cartCount, onCartOpen }) {
+export default function Header({ cartCount, onCartOpen, searchValue, onSearchChange }) {
   const [scrolled, setScrolled] = useState(false);
 
   useEffect(() => {
@@ -19,7 +20,8 @@ export default function Header({ cartCount, onCartOpen }) {
       position:      "sticky",
       top:           0,
       zIndex:        200,
-      height:        "var(--header-h)",
+      height:        "auto",
+      minHeight:     "var(--header-h)",
       background:    scrolled
         ? "rgba(46,16,101,.97)"
         : "linear-gradient(135deg, var(--purple-deep), var(--purple-main))",
@@ -28,7 +30,7 @@ export default function Header({ cartCount, onCartOpen }) {
       transition:    "background var(--duration-base) var(--ease-out), box-shadow var(--duration-base) var(--ease-out)",
       display:       "flex",
       alignItems:    "center",
-      padding:       "0 var(--space-5)",
+      padding:       "var(--space-2) var(--space-5)",
     }}>
       <div style={{
         width:          "100%",
@@ -37,7 +39,10 @@ export default function Header({ cartCount, onCartOpen }) {
         display:        "flex",
         alignItems:     "center",
         justifyContent: "space-between",
+        gap:            "var(--space-4)",
+        flexWrap:       "wrap" // Responsivo para celulares
       }}>
+        
         {/* Logo */}
         <div style={{ display: "flex", alignItems: "center", gap: "var(--space-3)" }}>
           <div style={{
@@ -68,6 +73,45 @@ export default function Header({ cartCount, onCartOpen }) {
               Fragrâncias & Cosméticos
             </p>
           </div>
+        </div>
+
+        {/* 🔍 BARRA DE PESQUISA INTEGRADA NO CORAÇÃO DO HEADER */}
+        <div style={{ 
+          flex: "1 1 300px", 
+          maxWidth: "500px", 
+          position: "relative",
+          order: window.innerWidth < 640 ? 3 : 0 // Joga para baixo se for celular bem pequeno
+        }}>
+          <span style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)", fontSize: "1rem" }}>🔍</span>
+          <input
+            type="text"
+            placeholder="Buscar por shampoo, esmalte, marca..."
+            value={searchValue}
+            onChange={(e) => onSearchChange(e.target.value)}
+            style={{
+              width: "100%",
+              padding: "10px 14px 10px 38px",
+              borderRadius: "var(--radius-full)",
+              border: "1px solid rgba(255,255,255,.2)",
+              background: "rgba(255,255,255,.08)",
+              color: "#fff",
+              fontSize: ".9rem",
+              outline: "none",
+              transition: "all 0.2s",
+            }}
+            onFocus={(e) => {
+              e.target.style.background = "var(--surface)";
+              e.target.style.color = "var(--purple-deep)";
+              e.target.style.boxShadow = "0 0 0 3px rgba(167,139,250,.3)";
+            }}
+            onBlur={(e) => {
+              if(!e.target.value) {
+                e.target.style.background = "rgba(255,255,255,.08)";
+                e.target.style.color = "#fff";
+                e.target.style.boxShadow = "none";
+              }
+            }}
+          />
         </div>
 
         {/* Botão carrinho */}
