@@ -1,12 +1,11 @@
 // ============================================================
 //  TAKEO PERFUMARIA — components/Header.jsx
-//  Header limpo com busca integrada (Sem contadores fixos)
 // ============================================================
 import { useState, useEffect } from "react";
 import { CONFIG } from "../../utils/formatters.js";
 import { Icons } from "./Icons.jsx";
 
-export default function Header({ cartCount, onCartOpen, searchValue, onSearchChange }) {
+export default function Header({ cartCount, onCartOpen, searchValue, onSearchChange, isMobile, onGoHome }) {
   const [scrolled, setScrolled] = useState(false);
 
   useEffect(() => {
@@ -40,11 +39,15 @@ export default function Header({ cartCount, onCartOpen, searchValue, onSearchCha
         alignItems:     "center",
         justifyContent: "space-between",
         gap:            "var(--space-4)",
-        flexWrap:       "wrap" // Responsivo para celulares
       }}>
         
-        {/* Logo */}
-        <div style={{ display: "flex", alignItems: "center", gap: "var(--space-3)" }}>
+        {/* Logo Clicável (Volta para a Home e limpa todos os filtros) */}
+        <div 
+          onClick={onGoHome}
+          style={{ display: "flex", alignItems: "center", gap: "var(--space-3)", cursor: "pointer", transition: "opacity 0.2s" }}
+          onMouseEnter={(e) => e.currentTarget.style.opacity = "0.8"}
+          onMouseLeave={(e) => e.currentTarget.style.opacity = "1"}
+        >
           <div style={{
             width:      40,
             height:     40,
@@ -75,46 +78,31 @@ export default function Header({ cartCount, onCartOpen, searchValue, onSearchCha
           </div>
         </div>
 
-        {/* 🔍 BARRA DE PESQUISA INTEGRADA NO CORAÇÃO DO HEADER */}
-        <div style={{ 
-          flex: "1 1 300px", 
-          maxWidth: "500px", 
-          position: "relative",
-          order: window.innerWidth < 640 ? 3 : 0 // Joga para baixo se for celular bem pequeno
-        }}>
-          <span style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)", fontSize: "1rem" }}>🔍</span>
-          <input
-            type="text"
-            placeholder="Buscar por shampoo, esmalte, marca..."
-            value={searchValue}
-            onChange={(e) => onSearchChange(e.target.value)}
-            style={{
-              width: "100%",
-              padding: "10px 14px 10px 38px",
-              borderRadius: "var(--radius-full)",
-              border: "1px solid rgba(255,255,255,.2)",
-              background: "rgba(255,255,255,.08)",
-              color: "#fff",
-              fontSize: ".9rem",
-              outline: "none",
-              transition: "all 0.2s",
-            }}
-            onFocus={(e) => {
-              e.target.style.background = "var(--surface)";
-              e.target.style.color = "var(--purple-deep)";
-              e.target.style.boxShadow = "0 0 0 3px rgba(167,139,250,.3)";
-            }}
-            onBlur={(e) => {
-              if(!e.target.value) {
-                e.target.style.background = "rgba(255,255,255,.08)";
-                e.target.style.color = "#fff";
-                e.target.style.boxShadow = "none";
-              }
-            }}
-          />
-        </div>
+        {/* Busca no Header (Apenas Celular) */}
+        {isMobile && (
+          <div style={{ flex: "1 1 200px", maxWidth: "400px", position: "relative" }}>
+            <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)", fontSize: ".9rem" }}>🔍</span>
+            <input
+              type="text"
+              placeholder="Buscar..."
+              value={searchValue}
+              onChange={(e) => onSearchChange(e.target.value)}
+              onFocus={() => window.scrollTo({ top: 0, behavior: "smooth" })}
+              style={{
+                width: "100%",
+                padding: "8px 12px 8px 34px",
+                borderRadius: "var(--radius-full)",
+                border: "1px solid rgba(255,255,255,.2)",
+                background: "rgba(255,255,255,.08)",
+                color: "#fff",
+                fontSize: ".85rem",
+                outline: "none",
+              }}
+            />
+          </div>
+        )}
 
-        {/* Botão carrinho */}
+        {/* Botão Carrinho */}
         <button
           onClick={onCartOpen}
           aria-label="Abrir carrinho"
@@ -132,10 +120,7 @@ export default function Header({ cartCount, onCartOpen, searchValue, onSearchCha
             fontWeight:     600,
             fontSize:       ".85rem",
             cursor:         "pointer",
-            transition:     "background var(--duration-fast) var(--ease-out)",
           }}
-          onMouseEnter={(e) => e.currentTarget.style.background = "rgba(255,255,255,.22)"}
-          onMouseLeave={(e) => e.currentTarget.style.background = "rgba(255,255,255,.13)"}
         >
           <Icons.Cart size={20} />
           {cartCount > 0 && (
@@ -155,9 +140,8 @@ export default function Header({ cartCount, onCartOpen, searchValue, onSearchCha
               justifyContent: "center",
               padding:    "0 5px",
               border:     "2.5px solid var(--purple-main)",
-              animation:  "bounceCart .5s var(--ease-spring)",
             }}>
-              {cartCount > 99 ? "99+" : cartCount}
+              {cartCount}
             </span>
           )}
         </button>
