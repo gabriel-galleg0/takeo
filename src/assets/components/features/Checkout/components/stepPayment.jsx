@@ -126,7 +126,8 @@ export default function StepPayment({ totalPrice, cartItems, addr, onBack, onFin
             total: Number(totalPrice.toFixed(2)),
             installments: method === "credit_card" ? Number(installments) : 1,
             email: addr.email,
-            nome: addr.nome
+            nome: addr.nome,
+            cartItems: cartItems
           })
         });
 
