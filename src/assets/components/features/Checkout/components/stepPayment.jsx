@@ -1,16 +1,28 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { fmt, maskCard, maskExpiry, maskCVV } from "../../../../../utils/formatters.js";
 import { Icons } from "../../../Icons.jsx";
+import { useToast } from "../../../../../Hooks/useToast.js"; // 🚀 Importado o seu Hook de Toast!
 
 export default function StepPayment({ totalPrice, cartItems, addr, onBack, onFinish }) {
-  const [method, setMethod] = useState("pix"); // "pix", "credit_card" ou "debit_card"
+  const [method, setMethod] = useState("pix"); 
   const [card, setCard] = useState({ num: "", name: "", expiry: "", cvv: "" });
   const [installments, setInstallments] = useState(1);
   const [loading, setLoading] = useState(false);
   const [pixDados, setPixDados] = useState(null);
   const [success, setSuccess] = useState(false);
 
-  const updCard = (field) => (val) => setCard((c) => ({ ...c, [field]: val }));
+  // 🚀 ESTADOS PARA TRATAMENTO DE ERROS SEM BLOQUEAR A TELA
+  const [paymentError, setPaymentError] = useState(null);
+
+  const [installmentOptions, setInstallmentOptions] = useState([]);
+  const [lastBin, setLastBin] = useState("");
+
+  const toast = useToast(); // Instanciado o seu sistema de avisos
+
+  const updCard = (field) => (val) => {
+    setCard((c) => ({ ...c, [field]: val }));
+    if (paymentError) setPaymentError(null); // Limpa o erro assim que o usuário mexe no cartão
+  };
   
   const cardOk = card.num.replace(/\s/g, "").length === 16 && 
                  card.name && 
@@ -19,14 +31,37 @@ export default function StepPayment({ totalPrice, cartItems, addr, onBack, onFin
 
   const canFinish = method === "pix" || cardOk;
 
-  // Quando mudar para produção, basta trocar essa string pela sua Public Key produtiva (APP_USR-...)
   const PUBLIC_KEY = "TEST-a9ed8d5b-9e3d-4e02-ae1e-4e492a7986e1"; 
+
+  // Busca de parcelas via BIN
+  useEffect(() => {
+    const fetchInstallments = async () => {
+      const cleanNum = card.num.replace(/\s/g, "");
+      const currentBin = cleanNum.substring(0, 6);
+
+      if (method === "credit_card" && currentBin.length >= 6 && currentBin !== lastBin) {
+        setLastBin(currentBin);
+        try {
+          if (!window.MercadoPago) throw new Error("MercadoPago.js não carregado");
+          const mp = new window.MercadoPago(PUBLIC_KEY);
+          const response = await mp.getInstallments({ amount: String(totalPrice), bin: currentBin });
+          if (response && response.length > 0) {
+            setInstallmentOptions(response[0].payer_costs);
+            setInstallments(response[0].payer_costs[0].installments);
+          }
+        } catch (error) { console.error("Erro parcelas:", error); }
+      } else if (currentBin.length < 6 && installmentOptions.length > 0) {
+        setInstallmentOptions([]); setLastBin("");
+      }
+    };
+    fetchInstallments();
+  }, [card.num, method, totalPrice, lastBin, installmentOptions.length]);
 
   const handleFinish = async () => {
     if (!canFinish) return;
     setLoading(true);
+    setPaymentError(null); // Reseta erros antigos ao clicar
 
-    // ==================== FLUXO DO PIX ====================
     if (method === "pix") {
       try {
         const response = await fetch("/api/criar-pix", {
@@ -41,85 +76,97 @@ export default function StepPayment({ totalPrice, cartItems, addr, onBack, onFin
         const dados = await response.json();
         if (response.ok) {
           setPixDados(dados);
-          setLoading(false);
         } else {
           throw new Error(dados.error);
         }
       } catch (err) {
-        alert("Erro ao gerar o PIX: " + err.message);
-        setLoading(false);
+        setPaymentError("Não foi possível gerar o PIX. Tente novamente.");
+        toast.show("❌ Erro ao processar PIX", "error");
+      } finally {
+        setLoading(false); 
       }
-    } 
+    } else {
+      try {
+        const mp = new window.MercadoPago(PUBLIC_KEY);
+        const [expiryMonth, expiryYear] = card.expiry.split("/");
+        const fullYear = `20${expiryYear}`;
+        const cleanCardNumber = card.num.replace(/\s/g, "");
 
-    // ... dentro de stepPayment.jsx, no bloco 'else' do cartão:
-try {
-  const mp = new window.MercadoPago(PUBLIC_KEY);
-  
-  const [expiryMonth, expiryYear] = card.expiry.split("/");
-  const fullYear = `20${expiryYear}`;
-  const cleanCardNumber = card.num.replace(/\s/g, "");
+        const bin = cleanCardNumber.substring(0, 6);
+        const paymentMethods = await mp.getPaymentMethods({ bin });
+        
+        if (!paymentMethods || !paymentMethods.results || paymentMethods.results.length === 0) {
+          throw new Error("Não conseguimos identificar a bandeira do cartão.");
+        }
 
-  // 1. Identifica a bandeira de forma dinâmica pelo BIN
-  const bin = cleanCardNumber.substring(0, 6);
-  const paymentMethods = await mp.getPaymentMethods({ bin });
-  
-  if (!paymentMethods || !paymentMethods.results || paymentMethods.results.length === 0) {
-    throw new Error("Não foi possível identificar a bandeira do seu cartão.");
-  }
+        const detectedMethodId = paymentMethods.results[0].id;
 
-  const detectedMethodId = paymentMethods.results[0].id; // Retorna 'elo', 'visa', etc.
+        const tokenResponse = await mp.createCardToken({
+          cardNumber: cleanCardNumber,
+          cardholderName: card.name,
+          cardExpirationMonth: expiryMonth,
+          cardExpirationYear: fullYear,
+          securityCode: card.cvv,
+          identificationType: "CPF",
+          identificationNumber: "12345678909", 
+          paymentMethodId: detectedMethodId 
+        });
 
-  // 2. Cria o token mantendo o ID original retornado pelo SDK
-  const tokenResponse = await mp.createCardToken({
-    cardNumber: cleanCardNumber,
-    cardholderName: card.name,
-    cardExpirationMonth: expiryMonth,
-    cardExpirationYear: fullYear,
-    securityCode: card.cvv,
-    identificationType: "CPF",
-    identificationNumber: "12345678909", 
-    paymentMethodId: detectedMethodId 
-  });
+        if (!tokenResponse || !tokenResponse.id) {
+          throw new Error("Verifique os dados digitados e tente de novo.");
+        }
 
-  if (!tokenResponse || !tokenResponse.id) {
-    throw new Error("Falha ao gerar o token de segurança do cartão.");
-  }
+        const response = await fetch("/api/processar-cartao", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            token: tokenResponse.id,
+            payment_method_id: detectedMethodId,
+            total: Number(totalPrice.toFixed(2)),
+            installments: method === "credit_card" ? Number(installments) : 1,
+            email: addr.email,
+            nome: addr.nome
+          })
+        });
 
-  // 3. Envia os parâmetros dinâmicos para a API
-  const response = await fetch("/api/processar-cartao", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      token: tokenResponse.id,
-      payment_method_id: detectedMethodId, // Repassa exatamente o ID detectado
-      total: Number(totalPrice.toFixed(2)),
-      installments: method === "credit_card" ? Number(installments) : 1,
-      email: addr.email,
-      nome: addr.nome
-    })
-  });
+        const dados = await response.json();
 
-  const dados = await response.json();
+        if (response.ok) {
+          if (dados.status === "approved" || dados.status === "in_process" || dados.status === "pending") {
+            setSuccess(true);
+            setTimeout(() => onFinish(), 1600);
+          } else {
+            // Se o Mercado Pago recusar internamente (Ex: FUND, SECU, EXPI)
+            const msg = dados.status_detail === "cc_rejected_insufficient_amount" 
+              ? "Cartão Recusado: Saldo ou limite insuficiente." 
+              : "Cartão Recusado: Dados incorretos ou suspeita de fraude.";
+            setPaymentError(msg);
+            toast.show("💳 Cartão recusado pelo banco", "warning");
+          }
+        } else {
+          throw new Error(dados.error || "Transação recusada pela operadora.");
+        }
 
-  if (response.ok) {
-    if (dados.status === "approved" || dados.status === "in_process" || dados.status === "pending") {
-      setLoading(false);
-      setSuccess(true);
-      setTimeout(() => onFinish(), 1600);
+      } catch (err) {
+        // 🚀 CUSTOMIZAÇÃO EXCLUSIVA DE TESTES (Traduz os códigos da tabela que você mandou)
+        let customMessage = err.message;
+        if (card.name === "FUND") customMessage = "Saldo ou limite insuficiente no cartão de crédito.";
+        if (card.name === "SECU") customMessage = "Código de segurança (CVV) inválido.";
+        if (card.name === "EXPI") customMessage = "Data de validade do cartão expirada.";
+        if (card.name === "OTHE") customMessage = "Erro geral na transação. Use outro cartão.";
+
+        setPaymentError(customMessage);
+        toast.show("⚠️ Ops! Falha no pagamento", "error");
+      } finally {
+        setLoading(false); 
+      }
     }
-  } else {
-    throw new Error(dados.error || "Pagamento recusado.");
-  }
-} catch (err) {
-  alert("Erro no pagamento: " + err.message);
-  setLoading(false);
-}
   };
 
   if (success) {
     return (
-      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "var(--space-5)", padding: "var(--space-8) 0", animation: "scaleIn .4s var(--ease-spring)", textAlign: "center" }}>
-        <div style={{ width: 80, height: 80, borderRadius: "50%", background: "linear-gradient(135deg, var(--green-wa), #34d399)", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", boxShadow: "0 8px 24px rgba(16,185,129,.4)" }}>
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justify: "center", gap: "var(--space-5)", padding: "var(--space-8) 0", textAlign: "center" }}>
+        <div style={{ width: 80, height: 80, borderRadius: "50%", background: "linear-gradient(135deg, var(--green-wa), #34d399)", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff" }}>
           <Icons.CheckCircle size={40} />
         </div>
         <div>
@@ -135,13 +182,13 @@ try {
       <h3 style={{ fontFamily: "var(--font-display)", fontSize: "1.2rem", color: "var(--purple-deep)" }}>Forma de pagamento</h3>
 
       <div style={{ display: "flex", gap: "var(--space-2)" }}>
-        <button onClick={() => { setMethod("pix"); setPixDados(null); }} style={{ flex: 1, padding: "var(--space-3)", border: `2px solid ${method === "pix" ? "var(--purple-mid)" : "var(--border-purple)"}`, borderRadius: "var(--radius-lg)", background: method === "pix" ? "var(--lilac-pale)" : "var(--surface)", color: "var(--purple-deep)", display: "flex", flexDirection: "column", alignItems: "center", gap: "var(--space-1)", fontSize: ".85rem" }}>
+        <button onClick={() => { setMethod("pix"); setPixDados(null); setPaymentError(null); }} style={{ flex: 1, padding: "var(--space-3)", border: `2px solid ${method === "pix" ? "var(--purple-mid)" : "var(--border-purple)"}`, borderRadius: "var(--radius-lg)", background: method === "pix" ? "var(--lilac-pale)" : "var(--surface)", color: "var(--purple-deep)", display: "flex", flexDirection: "column", alignItems: "center", gap: "var(--space-1)", fontSize: ".85rem" }}>
           <Icons.Pix size={18} /> Pix
         </button>
-        <button onClick={() => setMethod("credit_card")} style={{ flex: 1, padding: "var(--space-3)", border: `2px solid ${method === "credit_card" ? "var(--purple-mid)" : "var(--border-purple)"}`, borderRadius: "var(--radius-lg)", background: method === "credit_card" ? "var(--lilac-pale)" : "var(--surface)", color: "var(--purple-deep)", display: "flex", flexDirection: "column", alignItems: "center", gap: "var(--space-1)", fontSize: ".85rem" }}>
+        <button onClick={() => { setMethod("credit_card"); setPaymentError(null); }} style={{ flex: 1, padding: "var(--space-3)", border: `2px solid ${method === "credit_card" ? "var(--purple-mid)" : "var(--border-purple)"}`, borderRadius: "var(--radius-lg)", background: method === "credit_card" ? "var(--lilac-pale)" : "var(--surface)", color: "var(--purple-deep)", display: "flex", flexDirection: "column", alignItems: "center", gap: "var(--space-1)", fontSize: ".85rem" }}>
           <Icons.CreditCard size={18} /> Crédito
         </button>
-        <button onClick={() => setMethod("debit_card")} style={{ flex: 1, padding: "var(--space-3)", border: `2px solid ${method === "debit_card" ? "var(--purple-mid)" : "var(--border-purple)"}`, borderRadius: "var(--radius-lg)", background: method === "debit_card" ? "var(--lilac-pale)" : "var(--surface)", color: "var(--purple-deep)", display: "flex", flexDirection: "column", alignItems: "center", gap: "var(--space-1)", fontSize: ".85rem" }}>
+        <button onClick={() => { setMethod("debit_card"); setPaymentError(null); }} style={{ flex: 1, padding: "var(--space-3)", border: `2px solid ${method === "debit_card" ? "var(--purple-mid)" : "var(--border-purple)"}`, borderRadius: "var(--radius-lg)", background: method === "debit_card" ? "var(--lilac-pale)" : "var(--surface)", color: "var(--purple-deep)", display: "flex", flexDirection: "column", alignItems: "center", gap: "var(--space-1)", fontSize: ".85rem" }}>
           <Icons.CreditCard size={18} /> Débito
         </button>
       </div>
@@ -176,13 +223,37 @@ try {
           {method === "credit_card" && (
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
               <label style={{ fontSize: ".78rem", fontWeight: 700, color: "var(--purple-deep)" }}>Parcelas</label>
-              <select value={installments} onChange={(e) => setInstallments(e.target.value)} style={{ width: "100%", padding: "var(--space-3) var(--space-4)", background: "var(--lilac-pale)", border: "1.5px solid var(--border-purple)", borderRadius: "var(--radius-md)" }}>
-                <option value={1}>1x de {fmt(totalPrice)} sem juros</option>
-                <option value={2}>2x de {fmt(totalPrice / 2)} sem juros</option>
-                <option value={3}>3x de {fmt(totalPrice / 3)} sem juros</option>
+              <select value={installments} onChange={(e) => setInstallments(Number(e.target.value))} disabled={installmentOptions.length === 0} style={{ width: "100%", padding: "var(--space-3) var(--space-4)", background: installmentOptions.length === 0 ? "var(--surface-2)" : "var(--lilac-pale)", border: "1.5px solid var(--border-purple)", borderRadius: "var(--radius-md)", color: "var(--purple-deep)" }}>
+                {installmentOptions.length === 0 ? (
+                  <option value={1}>Digite o cartão para ver as parcelas</option>
+                ) : (
+                  installmentOptions.map((opt) => (
+                    <option key={opt.installments} value={opt.installments}>{opt.recommended_message}</option>
+                  ))
+                )}
               </select>
             </div>
           )}
+        </div>
+      )}
+
+      {/* 🚀 CAIXA DE FILTRO VISUAL PREMIUM PARA O ERRO (PERFEITO PARA CELULAR) */}
+      {paymentError && (
+        <div style={{ 
+          display: "flex", 
+          alignItems: "center", 
+          gap: "10px", 
+          background: "#FEF2F2", 
+          border: "1px solid #FCA5A5", 
+          padding: "12px", 
+          borderRadius: "var(--radius-lg)", 
+          marginTop: "10px",
+          animation: "fadeIn 0.2s ease-out"
+        }}>
+          <span style={{ fontSize: "1.2rem" }}>⚠️</span>
+          <p style={{ color: "#991B1B", fontSize: ".82rem", fontWeight: 600, margin: 0, lineHeight: 1.4 }}>
+            {paymentError}
+          </p>
         </div>
       )}
 

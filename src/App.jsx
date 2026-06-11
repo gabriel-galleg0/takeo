@@ -1,6 +1,6 @@
 // ============================================================
 //  TAKEO PERFUMARIA — App.jsx
-//  Orquestrador Principal Corrigido: Sem Gênero + Marcas Protegidas
+//  Orquestrador: Landing Page Ikesaki + Filtro Checkbox Preço
 // ============================================================
 import { useState, useEffect, useCallback, useMemo } from "react";
 
@@ -31,14 +31,13 @@ export default function App() {
   const [currentPage,    setCurrentPage]    = useState(1);
   const itemsPerPage = 20;
 
-  // 🚀 FILTROS ACUMULATIVOS GLOBAIS CORRIGIDOS
+  // Filtros Globais
   const [filterBrand,    setFilterBrand]    = useState("Todos");
   const [filterSub,      setFilterSub]      = useState("Todos");
   const [filterPromo,    setFilterPromo]    = useState(false);
   
-  // Faixa de preço padrão
-  const [minPrice,       setMinPrice]       = useState(0);
-  const [maxPrice,       setMaxPrice]       = useState(1000);
+  // 🚀 NOVO: Filtro de Preço via Checkbox/Radio
+  const [priceRange,     setPriceRange]     = useState("Todos");
 
   const [isMobile,       setIsMobile]       = useState(window.innerWidth < 768);
   const [showScrollTop,  setShowScrollTop]  = useState(false);
@@ -52,10 +51,7 @@ export default function App() {
 
     window.addEventListener("resize", handleResize);
     window.addEventListener("scroll", handleScroll);
-    return () => {
-      window.removeEventListener("resize", handleResize);
-      window.removeEventListener("scroll", handleScroll);
-    };
+    return () => { window.removeEventListener("resize", handleResize); window.removeEventListener("scroll", handleScroll); };
   }, []);
 
   const fetchProducts = useCallback(async () => {
@@ -67,43 +63,42 @@ export default function App() {
       const data = await res.json();
       if (!Array.isArray(data)) throw new Error("Formato de dados inesperado vindo da API");
       
-      // Mapeia e garante propriedades limpas
       const parsed = data.map(item => {
         const p = parseProduct(item);
-        // Fallback caso o nome da coluna mude de maiúsculo/minúsculo na planilha/formatter
         return {
           ...p,
           marca: p.marca || item.marca || item.Marca || "Outros",
-          subcategoria: p.subcategoria || item.subcategoria || item.Subcategoria || "Outros"
+          subcategoria: p.subcategoria || item.subcategoria || item.Subcategoria || "Outros",
+          oferta_limitada: item.oferta_limitada === "TRUE" || item.oferta_limitada === "Sim" || item.oferta_limitada === true
         };
       });
 
       setProducts(parsed);
-    } catch (err) {
-      console.error("[Takeo]", err);
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
+    } catch (err) { setError(err.message); } finally { setLoading(false); }
   }, []);
 
   useEffect(() => { fetchProducts(); }, [fetchProducts]);
 
-  // 🏷️ Extratores Dinâmicos de Opções (Varre a planilha limpa removendo duplicados)
-  const categories = useMemo(() => [...new Set(products.map(p => p.categoria).filter(Boolean))].sort(), [products]);
-  
-  const brands = useMemo(() => {
-    const list = products.map(p => p.marca).filter(Boolean);
-    return ["Todos", ...new Set(list)].sort();
+  // 🌳 Árvore de Categorias para o Mega Menu do Header
+  const categoryTree = useMemo(() => {
+    const tree = {};
+    products.forEach(p => {
+      if (!p.categoria) return;
+      if (!tree[p.categoria]) tree[p.categoria] = new Set();
+      if (p.subcategoria && p.subcategoria !== "Outros") tree[p.categoria].add(p.subcategoria);
+    });
+    // Converte Sets para Arrays ordenados
+    Object.keys(tree).forEach(k => { tree[k] = [...tree[k]].sort() });
+    return tree;
   }, [products]);
-  
+
+  const categories = Object.keys(categoryTree).sort();
+  const brands = useMemo(() => ["Todos", ...new Set(products.map(p => p.marca).filter(Boolean))].sort(), [products]);
   const subcategories = useMemo(() => {
     const target = viewCategory !== null ? products.filter(p => p.categoria === viewCategory) : products;
-    const list = target.map(p => p.subcategoria).filter(Boolean);
-    return ["Todos", ...new Set(list)].sort();
+    return ["Todos", ...new Set(target.map(p => p.subcategoria).filter(Boolean))].sort();
   }, [products, viewCategory]);
 
-  // 📈 REGRA DE NEGÓCIO: Ordenação indutiva (Destaques e Ofertas sempre no topo)
   const sortedProducts = useMemo(() => {
     return [...products].sort((a, b) => {
       let scoreA = (a.destaque === true || a.destaque === "TRUE" ? 2 : 0) + (a.preco_promo !== null && a.preco_promo !== "" ? 1 : 0);
@@ -112,83 +107,52 @@ export default function App() {
     });
   }, [products]);
 
-  // 🌪️ PIPELINE DE FILTRAGEM ACUMULATIVA (Multi-filtros dinâmicos estilo Amazon)
+  // 🌪️ Filtragem com Lógica de Faixa de Preço (Checkboxes)
   const filteredProducts = useMemo(() => {
     return sortedProducts.filter((p) => {
       const currentPrice = (p.preco_promo !== null && p.preco_promo !== "") ? Number(p.preco_promo) : Number(p.preco);
 
-      const matchesSearch = !search.trim() || 
-        p.nome.toLowerCase().includes(search.trim().toLowerCase()) || 
-        p.categoria.toLowerCase().includes(search.trim().toLowerCase()) ||
-        p.marca.toLowerCase().includes(search.trim().toLowerCase());
-
+      const matchesSearch = !search.trim() || p.nome.toLowerCase().includes(search.trim().toLowerCase()) || p.categoria.toLowerCase().includes(search.trim().toLowerCase()) || p.marca.toLowerCase().includes(search.trim().toLowerCase());
       const matchesCategory = !viewCategory || p.categoria === viewCategory;
       const matchesSub      = filterSub === "Todos" || p.subcategoria === filterSub;
       const matchesBrand    = filterBrand === "Todos" || p.marca === filterBrand;
       const matchesPromo    = !filterPromo || (p.preco_promo !== null && p.preco_promo !== "");
-      const matchesPrice    = currentPrice >= minPrice && currentPrice <= maxPrice;
+      
+      let matchesPrice = true;
+      if (priceRange === "ate50") matchesPrice = currentPrice <= 50;
+      else if (priceRange === "50a100") matchesPrice = currentPrice > 50 && currentPrice <= 100;
+      else if (priceRange === "acima100") matchesPrice = currentPrice > 100;
 
       return matchesSearch && matchesCategory && matchesSub && matchesBrand && matchesPromo && matchesPrice;
     });
-  }, [sortedProducts, search, viewCategory, filterSub, filterBrand, filterPromo, minPrice, maxPrice]);
+  }, [sortedProducts, search, viewCategory, filterSub, filterBrand, filterPromo, priceRange]);
 
-  // Monitora se o usuário mexeu em qualquer botão da interface Home
   const isAnyFilterActive = useMemo(() => {
-    return search.trim() !== "" || filterBrand !== "Todos" || filterSub !== "Todos" || filterPromo || minPrice > 0 || maxPrice < 1000;
-  }, [search, filterBrand, filterSub, filterPromo, minPrice, maxPrice]);
+    return search.trim() !== "" || filterBrand !== "Todos" || filterSub !== "Todos" || filterPromo || priceRange !== "Todos";
+  }, [search, filterBrand, filterSub, filterPromo, priceRange]);
 
-  // 📑 PAGINAÇÃO DE RESULTADOS
   const totalPages = Math.ceil(filteredProducts.length / itemsPerPage);
   const paginatedProducts = useMemo(() => {
     const start = (currentPage - 1) * itemsPerPage;
     return filteredProducts.slice(start, start + itemsPerPage);
   }, [filteredProducts, currentPage]);
 
-  // 🚀 ALGORITMO DE TAGS (Cross-Selling Avançado)
-  const relatedProducts = useMemo(() => {
-    if (!modalProduct) return [];
-    
-    const targetTags = modalProduct.tags ? String(modalProduct.tags).split(",").map(t => t.trim().toLowerCase()) : [];
-    if (targetTags.length === 0) {
-      return products.filter(p => p.categoria === modalProduct.categoria && p.id !== modalProduct.id).slice(0, 6);
-    }
+  const limitedTimeOffers = useMemo(() => products.filter(p => p.oferta_limitada).slice(0, 8), [products]);
 
-    return products
-      .filter(p => p.id !== modalProduct.id)
-      .map((p) => {
-        const pTags = p.tags ? String(p.tags).split(",").map(t => t.trim().toLowerCase()) : [];
-        const points = pTags.reduce((acc, tag) => acc + (targetTags.includes(tag) ? 1 : 0), 0);
-        return { product: p, points };
-      })
-      .filter(item => item.points > 0 || item.product.categoria === modalProduct.categoria)
-      .sort((a, b) => b.points - a.points)
-      .map(item => item.product)
-      .slice(0, 6);
-  }, [modalProduct, products]);
-
-  const handleCategoryView = (cat) => {
-    setViewCategory(cat);
-    setFilterSub("Todos");
-    setFilterBrand("Todos");
-    setCurrentPage(1);
+  const handleMenuSelect = (categoria, subcategoria) => {
+    setViewCategory(categoria);
+    setFilterSub(subcategoria);
+    setSearch(""); setFilterBrand("Todos"); setFilterPromo(false); setPriceRange("Todos"); setCurrentPage(1);
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
   const handleGoHome = () => {
-    setViewCategory(null);
-    setSearch("");
-    setFilterBrand("Todos");
-    setFilterSub("Todos");
-    setFilterPromo(false);
-    setMinPrice(0);
-    setMaxPrice(1000);
-    setCurrentPage(1);
+    setViewCategory(null); setSearch(""); setFilterBrand("Todos"); setFilterSub("Todos"); setFilterPromo(false); setPriceRange("Todos"); setCurrentPage(1);
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
   const handleAdd = useCallback((product) => {
-    cart.add(product);
-    toast.show(`🛒 ${product.nome} adicionado!`, "info");
+    cart.add(product); toast.show(`🛒 ${product.nome} adicionado!`, "info");
   }, [cart, toast]);
 
   return (
@@ -202,6 +166,8 @@ export default function App() {
         onSearchChange={(val) => { setSearch(val); setViewCategory(null); setCurrentPage(1); }}
         isMobile={isMobile}
         onGoHome={handleGoHome}
+        categoryTree={categoryTree}
+        onSelectCategory={handleMenuSelect}
       />
 
       {cartOpen && <CartDrawer cart={cart} onClose={() => setCartOpen(false)} />}
@@ -209,49 +175,29 @@ export default function App() {
       {modalProduct && (
         <ProductModal 
           product={modalProduct} 
-          relatedProducts={relatedProducts}
+          relatedProducts={products.slice(0,6)} // Simplificado para o modal
           onOpenModal={setModalProduct}
           onClose={() => setModalProduct(null)} 
           onAdd={(p) => { handleAdd(p); setModalProduct(null); }} 
         />
       )}
-      
       <FloatingCart totalItems={cart.totalItems} totalPrice={cart.totalPrice} onOpen={() => setCartOpen(true)} />
 
-      <HeroBanner />
+      {!isAnyFilterActive && !viewCategory && <HeroBanner />}
 
-      {/* BARRA DE PESQUISA PRINCIPAL */}
       {!isMobile && (
         <div style={{ maxWidth: "var(--max-w)", margin: "var(--space-6) auto 0", padding: "0 var(--space-5)" }}>
           <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
             <span style={{ position: "absolute", left: 16, color: "var(--text-muted)", fontSize: "1.2rem" }}>🔍</span>
-            <input
-              type="text"
-              placeholder="O que você está procurando hoje? Busque por produto, categoria ou marca..."
-              value={search}
-              onChange={(e) => { setSearch(e.target.value); setViewCategory(null); setCurrentPage(1); }}
-              style={{ width: "100%", padding: "16px 16px 16px 52px", borderRadius: "var(--radius-full)", border: "2px solid var(--border-purple)", background: "#fff", fontSize: "1rem", outline: "none", boxShadow: "var(--shadow-sm)" }}
-            />
+            <input type="text" placeholder="O que você está procurando hoje?" value={search} onChange={(e) => { setSearch(e.target.value); setViewCategory(null); setCurrentPage(1); }} style={{ width: "100%", padding: "16px 16px 16px 52px", borderRadius: "var(--radius-full)", border: "2px solid var(--border-purple)", background: "#fff", fontSize: "1rem", outline: "none", boxShadow: "var(--shadow-sm)" }} />
           </div>
         </div>
       )}
 
-      {/* BOX DO CONTEÚDO PRINCIPAL CAIXADO */}
-      <main style={{
-        background:   "#FFFFFF",
-        borderRadius: "16px",
-        boxShadow:    "0 10px 40px rgba(0,0,0,0.06)",
-        maxWidth:     "var(--max-w)",
-        margin:       "24px auto 60px",
-        padding:      "var(--space-6) var(--space-6)",
-        position:     "relative",
-        zIndex:       10,
-        display:      "flex",
-        flexDirection: "column",
-        gap:          "var(--space-6)"
-      }}>
+      {/* BLOCO PRINCIPAL DA PÁGINA */}
+      <main style={{ background: "#FFFFFF", borderRadius: "16px", boxShadow: "0 10px 40px rgba(0,0,0,0.06)", maxWidth: "var(--max-w)", margin: "24px auto 60px", padding: "var(--space-6) var(--space-6)", position: "relative", zIndex: 10, display: "flex", flexDirection: "column", gap: "var(--space-6)" }}>
 
-        {/* 🌪️ PAINEL DE REFINAMENTO MULTI-FILTROS DA AMAZON (Gênero Removido!) */}
+        {/* 🌪️ PAINEL DE FILTROS COM PREÇO EM DROPDOWN/RADIO */}
         <div style={{ background: "#F9FAFB", padding: "var(--space-4)", borderRadius: "var(--radius-lg)", border: "1px solid var(--border)", display: "flex", flexWrap: "wrap", gap: "var(--space-4)", alignItems: "center" }}>
           
           <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
@@ -268,16 +214,14 @@ export default function App() {
             </select>
           </div>
 
-          {/* SLIDERS DE PREÇO CUSTOMIZADOS NATIVOS */}
-          <div style={{ display: "flex", flexWrap: "wrap", gap: "12px", alignItems: "center", minWidth: "240px" }}>
-            <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-              <span style={{ fontSize: ".68rem", fontWeight: 700, color: "var(--purple-mid)" }}>Preço Mín: R$ {minPrice}</span>
-              <input type="range" min="0" max="150" value={minPrice} onChange={(e) => { setMinPrice(Number(e.target.value)); setCurrentPage(1); }} style={{ accentColor: "var(--purple-main)", width: "110px" }} />
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-              <span style={{ fontSize: ".68rem", fontWeight: 700, color: "var(--purple-mid)" }}>Preço Máx: R$ {maxPrice}</span>
-              <input type="range" min="150" max="1000" value={maxPrice} onChange={(e) => { setMaxPrice(Number(e.target.value)); setCurrentPage(1); }} style={{ accentColor: "var(--purple-main)", width: "110px" }} />
-            </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            <span style={{ fontSize: ".7rem", fontWeight: 700, color: "var(--purple-mid)" }}>Faixa de Preço</span>
+            <select value={priceRange} onChange={(e) => { setPriceRange(e.target.value); setCurrentPage(1); }} style={{ padding: "6px 12px", borderRadius: "var(--radius-md)", border: "1px solid var(--border-purple)", background: "#fff", fontSize: ".85rem", color: "var(--purple-deep)", outline: "none" }}>
+              <option value="Todos">Qualquer Valor</option>
+              <option value="ate50">Até R$ 50,00</option>
+              <option value="50a100">De R$ 51 a R$ 100,00</option>
+              <option value="acima100">Acima de R$ 100,00</option>
+            </select>
           </div>
 
           <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: ".85rem", fontWeight: 600, color: "var(--purple-deep)", cursor: "pointer", marginTop: 14 }}>
@@ -290,21 +234,16 @@ export default function App() {
         </div>
 
         {/* LOADING & ERROR LAYOUT */}
-        {loading && <p style={{ textAlign: "center", color: "var(--purple-mid)", padding: "40px" }}>Buscando produtos atualizados na planilha...</p>}
-        {error && <p style={{ textAlign: "center", color: "#DC2626", padding: "40px" }}>Erro ao conectar: {error}</p>}
+        {loading && <p style={{ textAlign: "center", color: "var(--purple-mid)", padding: "40px" }}>Carregando Megastore...</p>}
+        {error && <p style={{ textAlign: "center", color: "#DC2626", padding: "40px" }}>Erro: {error}</p>}
 
-        {/* ============================================================
-            CHAVEAMENTO DE LAYOUT (AMAZON MODE)
-           ============================================================ */}
-        
         {!loading && !error && (
           <>
-            {/* CASO A: FILTRO ATIVADO (SOMe Carrossel, Abre Grade Única) */}
             {(isAnyFilterActive || viewCategory) ? (
               <section style={{ display: "flex", flexDirection: "column", gap: "var(--space-4)" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px solid var(--lilac-soft)", paddingBottom: 6, alignItems: "center" }}>
                   <h2 style={{ fontFamily: "var(--font-display)", fontSize: "1.4rem", fontWeight: 700, color: "var(--purple-deep)" }}>
-                    {viewCategory ? `Explorando Filas de ${viewCategory}` : "Resultados Encontrados"} ({filteredProducts.length})
+                    {viewCategory ? `Explorando ${viewCategory}` : "Resultados Encontrados"} ({filteredProducts.length})
                   </h2>
                 </div>
 
@@ -316,7 +255,6 @@ export default function App() {
                   </div>
                 )}
 
-                {/* Paginação */}
                 {totalPages > 1 && (
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, marginTop: "var(--space-6)" }}>
                     <button disabled={currentPage === 1} onClick={() => { setCurrentPage(p => p - 1); window.scrollTo({ top: 0, behavior: "smooth" }); }} style={{ padding: "8px 12px", borderRadius: "var(--radius-md)", border: "1px solid var(--border-purple)", background: "#fff", color: "var(--purple-main)", cursor: "pointer" }}>&lt;</button>
@@ -328,8 +266,34 @@ export default function App() {
                 )}
               </section>
             ) : (
-              /* CASO B: HOME LIMPA (Mostra as fileiras horizontais com os destaques e promos no topo de cada uma) */
-              <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-10)" }}>
+              
+              /* 🚀 LANDING PAGE PRINCIPAL ESTILO IKESAKI */
+              <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-12)" }}>
+                
+                {/* SESSÃO 1: OFERTAS POR TEMPO LIMITADO (Requer a coluna oferta_limitada na planilha) */}
+                {limitedTimeOffers.length > 0 && (
+                  <section style={{ background: "rgba(220, 38, 38, 0.05)", padding: "var(--space-6)", borderRadius: "var(--radius-xl)", border: "1px solid rgba(220, 38, 38, 0.2)" }}>
+                    <h2 style={{ fontFamily: "var(--font-display)", fontSize: "1.6rem", fontWeight: 800, color: "#DC2626", marginBottom: "var(--space-4)", display: "flex", alignItems: "center", gap: 8 }}>
+                      ⏳ Ofertas por tempo limitado!
+                    </h2>
+                    <div style={{ display: "flex", gap: "var(--space-4)", overflowX: "auto", paddingBottom: "var(--space-4)", scrollSnapType: "x mandatory", WebkitOverflowScrolling: "touch" }}>
+                      {limitedTimeOffers.map((p) => (
+                        <div key={p.id} style={{ flex: "0 0 250px", scrollSnapAlign: "start" }}>
+                          <ProductCard product={p} onAdd={handleAdd} onOpenModal={setModalProduct} />
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+                )}
+
+                {/* SESSÃO 2: PROVA SOCIAL / AVALIAÇÕES (Estático) */}
+                <section style={{ background: "linear-gradient(135deg, var(--purple-deep), var(--purple-main))", borderRadius: "var(--radius-xl)", padding: "var(--space-8)", color: "#fff", textAlign: "center", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "var(--space-3)", boxShadow: "0 10px 25px rgba(109,40,217,.3)" }}>
+                  <div style={{ fontSize: "2rem" }}>⭐⭐⭐⭐⭐</div>
+                  <h3 style={{ fontFamily: "var(--font-display)", fontSize: "1.5rem", fontWeight: 700 }}>A loja nº 1 em Cosméticos da Região</h3>
+                  <p style={{ maxWidth: 600, opacity: 0.9, lineHeight: 1.6 }}>Entrega rápida, produtos originais e atendimento impecável! Mais de 4.000 avaliações satisfeitas no Google.</p>
+                </section>
+
+                {/* SESSÃO 3: VITRINE POR CATEGORIAS */}
                 {categories.map((category) => {
                   const categoryProducts = sortedProducts.filter(p => p.categoria === category);
                   const carouselItems = categoryProducts.slice(0, 12);
@@ -337,9 +301,11 @@ export default function App() {
                   return (
                     <section key={category} style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", borderBottom: "1px solid var(--lilac-soft)", paddingBottom: 6 }}>
-                        <h2 style={{ fontFamily: "var(--font-display)", fontSize: "1.35rem", fontWeight: 700, color: "var(--purple-deep)", textTransform: "capitalize" }}>{category.toLowerCase()}</h2>
+                        <h2 style={{ fontFamily: "var(--font-display)", fontSize: "1.35rem", fontWeight: 700, color: "var(--purple-deep)", textTransform: "capitalize" }}>
+                          {category.toLowerCase() === "pele" ? "Tudo o que sua pele precisa ✨" : category.toLowerCase()}
+                        </h2>
                         {categoryProducts.length > 12 && (
-                          <button onClick={() => handleCategoryView(category)} style={{ background: "none", border: "none", color: "var(--purple-main)", fontWeight: 700, fontSize: ".82rem", cursor: "pointer" }}>Ver todos ({categoryProducts.length}) ➔</button>
+                          <button onClick={() => { setViewCategory(category); window.scrollTo({ top: 0, behavior: "smooth" }); }} style={{ background: "none", border: "none", color: "var(--purple-main)", fontWeight: 700, fontSize: ".82rem", cursor: "pointer" }}>Ver todos ➔</button>
                         )}
                       </div>
 
@@ -353,18 +319,15 @@ export default function App() {
                     </section>
                   );
                 })}
+
               </div>
             )}
           </>
         )}
       </main>
 
-      {/* BOTÃO VOLTAR AO TOPO */}
       {showScrollTop && (
-        <button
-          onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
-          style={{ position: "fixed", bottom: "calc(var(--space-6) + 70px)", right: "var(--space-6)", width: 46, height: 46, borderRadius: "50%", background: "linear-gradient(135deg, var(--purple-main), var(--purple-mid))", color: "#fff", border: "none", fontSize: "1.2rem", fontWeight: "bold", cursor: "pointer", boxShadow: "var(--shadow-lg)", display: "flex", alignItems: "center", justify: "center", zIndex: 500 }}
-        >▲</button>
+        <button onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })} style={{ position: "fixed", bottom: "calc(var(--space-6) + 70px)", right: "var(--space-6)", width: 46, height: 46, borderRadius: "50%", background: "linear-gradient(135deg, var(--purple-main), var(--purple-mid))", color: "#fff", border: "none", fontSize: "1.2rem", fontWeight: "bold", cursor: "pointer", boxShadow: "var(--shadow-lg)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 500 }}>▲</button>
       )}
 
       <Footer />
