@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { fmt, maskCard, maskExpiry, maskCVV } from "../../../../../utils/formatters.js";
 import { Icons } from "../../../Icons.jsx";
-import { useToast } from "../../../../../Hooks/useToast.js"; // 🚀 Importado o seu Hook de Toast!
+import { useToast } from "../../../../../Hooks/useToast.js";
 
 export default function StepPayment({ totalPrice, cartItems, addr, onBack, onFinish }) {
   const [method, setMethod] = useState("pix"); 
@@ -11,17 +11,18 @@ export default function StepPayment({ totalPrice, cartItems, addr, onBack, onFin
   const [pixDados, setPixDados] = useState(null);
   const [success, setSuccess] = useState(false);
 
-  // 🚀 ESTADOS PARA TRATAMENTO DE ERROS SEM BLOQUEAR A TELA
+  // Caixa de erro nativa na tela (Sem alerts travando o celular)
   const [paymentError, setPaymentError] = useState(null);
 
+  // Estados do parcelamento dinâmico do Mercado Pago
   const [installmentOptions, setInstallmentOptions] = useState([]);
   const [lastBin, setLastBin] = useState("");
 
-  const toast = useToast(); // Instanciado o seu sistema de avisos
+  const toast = useToast();
 
   const updCard = (field) => (val) => {
     setCard((c) => ({ ...c, [field]: val }));
-    if (paymentError) setPaymentError(null); // Limpa o erro assim que o usuário mexe no cartão
+    if (paymentError) setPaymentError(null); // Limpa o erro assim que o usuário digita algo novo
   };
   
   const cardOk = card.num.replace(/\s/g, "").length === 16 && 
@@ -33,7 +34,7 @@ export default function StepPayment({ totalPrice, cartItems, addr, onBack, onFin
 
   const PUBLIC_KEY = "TEST-a9ed8d5b-9e3d-4e02-ae1e-4e492a7986e1"; 
 
-  // Busca de parcelas via BIN
+  // Algoritmo que consulta as parcelas reais no Mercado Pago de acordo com o cartão digitado
   useEffect(() => {
     const fetchInstallments = async () => {
       const cleanNum = card.num.replace(/\s/g, "");
@@ -60,7 +61,7 @@ export default function StepPayment({ totalPrice, cartItems, addr, onBack, onFin
   const handleFinish = async () => {
     if (!canFinish) return;
     setLoading(true);
-    setPaymentError(null); // Reseta erros antigos ao clicar
+    setPaymentError(null);
 
     if (method === "pix") {
       try {
@@ -136,19 +137,18 @@ export default function StepPayment({ totalPrice, cartItems, addr, onBack, onFin
             setSuccess(true);
             setTimeout(() => onFinish(), 1600);
           } else {
-            // Se o Mercado Pago recusar internamente (Ex: FUND, SECU, EXPI)
             const msg = dados.status_detail === "cc_rejected_insufficient_amount" 
               ? "Cartão Recusado: Saldo ou limite insuficiente." 
-              : "Cartão Recusado: Dados incorretos ou suspeita de fraude.";
+              : "Cartão Recusado: Dados incorretos ou recusado pelo banco.";
             setPaymentError(msg);
-            toast.show("💳 Cartão recusado pelo banco", "warning");
+            toast.show("💳 Cartão recusado", "warning");
           }
         } else {
           throw new Error(dados.error || "Transação recusada pela operadora.");
         }
 
       } catch (err) {
-        // 🚀 CUSTOMIZAÇÃO EXCLUSIVA DE TESTES (Traduz os códigos da tabela que você mandou)
+        // Tradução customizada dos testes do Mercado Pago (FUND, SECU, EXPI, OTHE)
         let customMessage = err.message;
         if (card.name === "FUND") customMessage = "Saldo ou limite insuficiente no cartão de crédito.";
         if (card.name === "SECU") customMessage = "Código de segurança (CVV) inválido.";
@@ -158,14 +158,14 @@ export default function StepPayment({ totalPrice, cartItems, addr, onBack, onFin
         setPaymentError(customMessage);
         toast.show("⚠️ Ops! Falha no pagamento", "error");
       } finally {
-        setLoading(false); 
+        setLoading(false); // Destrava o botão obrigatoriamente
       }
     }
   };
 
   if (success) {
     return (
-      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justify: "center", gap: "var(--space-5)", padding: "var(--space-8) 0", textAlign: "center" }}>
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "var(--space-5)", padding: "var(--space-8) 0", textAlign: "center" }}>
         <div style={{ width: 80, height: 80, borderRadius: "50%", background: "linear-gradient(135deg, var(--green-wa), #34d399)", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff" }}>
           <Icons.CheckCircle size={40} />
         </div>
@@ -223,7 +223,7 @@ export default function StepPayment({ totalPrice, cartItems, addr, onBack, onFin
           {method === "credit_card" && (
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
               <label style={{ fontSize: ".78rem", fontWeight: 700, color: "var(--purple-deep)" }}>Parcelas</label>
-              <select value={installments} onChange={(e) => setInstallments(Number(e.target.value))} disabled={installmentOptions.length === 0} style={{ width: "100%", padding: "var(--space-3) var(--space-4)", background: installmentOptions.length === 0 ? "var(--surface-2)" : "var(--lilac-pale)", border: "1.5px solid var(--border-purple)", borderRadius: "var(--radius-md)", color: "var(--purple-deep)" }}>
+              <select value={installments} onChange={(e) => setInstallments(Number(e.target.value))} disabled={installmentOptions.length === 0} style={{ width: "100%", padding: "var(--space-3) var(--space-4)", background: installmentOptions.length === 0 ? "var(--surface-2)" : "var(--lilac-pale)", border: "1.5px solid var(--border-purple)", borderRadius: "var(--radius-md)", color: "var(--purple-deep)", outline: "none" }}>
                 {installmentOptions.length === 0 ? (
                   <option value={1}>Digite o cartão para ver as parcelas</option>
                 ) : (
@@ -237,23 +237,11 @@ export default function StepPayment({ totalPrice, cartItems, addr, onBack, onFin
         </div>
       )}
 
-      {/* 🚀 CAIXA DE FILTRO VISUAL PREMIUM PARA O ERRO (PERFEITO PARA CELULAR) */}
+      {/* Caixa de Erro Premium Visível na Tela (Perfeita para Celular) */}
       {paymentError && (
-        <div style={{ 
-          display: "flex", 
-          alignItems: "center", 
-          gap: "10px", 
-          background: "#FEF2F2", 
-          border: "1px solid #FCA5A5", 
-          padding: "12px", 
-          borderRadius: "var(--radius-lg)", 
-          marginTop: "10px",
-          animation: "fadeIn 0.2s ease-out"
-        }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "10px", background: "#FEF2F2", border: "1px solid #FCA5A5", padding: "12px", borderRadius: "var(--radius-lg)", marginTop: "10px", animation: "fadeIn 0.2s ease-out" }}>
           <span style={{ fontSize: "1.2rem" }}>⚠️</span>
-          <p style={{ color: "#991B1B", fontSize: ".82rem", fontWeight: 600, margin: 0, lineHeight: 1.4 }}>
-            {paymentError}
-          </p>
+          <p style={{ color: "#991B1B", fontSize: ".82rem", fontWeight: 600, margin: 0, lineHeight: 1.4 }}>{paymentError}</p>
         </div>
       )}
 

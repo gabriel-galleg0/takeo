@@ -174,11 +174,11 @@ export default function App() {
       
       {modalProduct && (
         <ProductModal 
-          product={modalProduct} 
-          relatedProducts={products.slice(0,6)} // Simplificado para o modal
+          product={modalProduct}
+          products={products} // 🔥 Trocamos 'relatedProducts' por 'products'
           onOpenModal={setModalProduct}
-          onClose={() => setModalProduct(null)} 
-          onAdd={(p) => { handleAdd(p); setModalProduct(null); }} 
+          onClose={() => setModalProduct(null)}
+          onAdd={handleAdd} 
         />
       )}
       <FloatingCart totalItems={cart.totalItems} totalPrice={cart.totalPrice} onOpen={() => setCartOpen(true)} />
